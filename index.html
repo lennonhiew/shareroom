@@ -493,8 +493,12 @@ function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.
 function isNarrow() { return matchMedia('(max-width: 860px)').matches; }
 function withTransition(fn) {
   if (!document.startViewTransition || reducedMotion.matches || document.hidden) return fn();
-  const vt = document.startViewTransition(fn);
-  vt.ready.catch(() => {}); vt.finished.catch(() => {}); // a skipped transition is fine: the update still ran
+  // the update must always happen: if the browser stalls the transition (no frames drawn), skip the animation
+  let done = false;
+  const run = () => { if (!done) { done = true; fn(); } };
+  const vt = document.startViewTransition(run);
+  vt.ready.catch(() => {}); vt.finished.catch(() => {}); vt.updateCallbackDone?.catch(() => {});
+  setTimeout(() => { if (!done) { vt.skipTransition(); run(); } }, 250);
 }
 function newPeer(id) {
   return new Promise((resolve, reject) => {
