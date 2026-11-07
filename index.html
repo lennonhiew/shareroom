@@ -128,6 +128,7 @@ main.chat-closed { grid-template-columns: 1fr 0px; }
 /* tiles */
 .tile { position: relative; background: #000; border-radius: 16px; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid var(--line); animation: tile-in 320ms var(--ease-out) both; }
 .tile.leaving { animation: tile-out 180ms ease-in forwards; }
+.tile.nopreview::before { content: "Your preview is hidden to save power. Friends still see your screen."; position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--muted); font-size: 13px; background: var(--surface); }
 @keyframes tile-in { from { opacity: 0; transform: scale(0.96) } }
 @keyframes tile-out { to { opacity: 0; transform: scale(0.97) } }
 .tile video { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -338,6 +339,8 @@ dialog[open]::backdrop { animation: fade-in 200ms; }
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
   <symbol id="i-install" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></symbol>
   <symbol id="i-bad" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></symbol>
   <symbol id="i-logo" viewBox="0 0 32 32"><rect x="1" y="1" width="30" height="30" rx="9" fill="#8B7CFF" stroke="none"/><rect x="7" y="9" width="18" height="12" rx="2.5" fill="none" stroke="#fff" stroke-width="2.4"/><path d="M13 25h6" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="23.5" cy="9" r="3.5" fill="#FF7A59" stroke="#8B7CFF" stroke-width="2"/></symbol>
 </svg>
@@ -433,7 +436,8 @@ dialog[open]::backdrop { animation: fade-in 200ms; }
   <div class="dlg-head"><h2>Settings</h2><button class="btn ghost icon-btn" id="closeSettings" title="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
   <div class="dlg-body">
     <div><h5>SCREEN QUALITY</h5>
-      <div class="seg" data-key="quality"><button data-v="720">720p</button><button data-v="1080">1080p</button><button data-v="1080-60">1080p60</button><button data-v="source">Max</button></div>
+      <div class="seg" data-key="quality"><button data-v="auto">Auto</button><button data-v="720-60">720p 60</button><button data-v="1080">1080p 30</button><button data-v="1080-60">1080p 60</button><button data-v="source">Max</button></div>
+      <p class="note" id="gpuNote" style="margin:8px 0 0"></p>
     </div>
     <div><h5>OPTIMISE FOR</h5>
       <div class="seg" data-key="mode"><button data-v="motion">Games &amp; video</button><button data-v="detail">Text &amp; code</button></div>
@@ -450,11 +454,26 @@ dialog[open]::backdrop { animation: fade-in 200ms; }
 'use strict';
 const PREFIX = 'shareroom-v1-';
 const QUALITY = {
-  '720':     { w: 1280, h: 720,  fps: 30, br: 2500000 },
-  '1080':    { w: 1920, h: 1080, fps: 30, br: 4500000 },
-  '1080-60': { w: 1920, h: 1080, fps: 60, br: 8000000 },
-  'source':  { w: null, h: null, fps: 60, br: 12000000 },
+  '720-60':  { w: 1280, h: 720,  fps: 60, br: 6000000 },
+  '1080':    { w: 1920, h: 1080, fps: 30, br: 5000000 },
+  '1080-60': { w: 1920, h: 1080, fps: 60, br: 10000000 },
+  'source':  { w: null, h: null, fps: 60, br: 16000000 },
 };
+const DEFAULT_QUALITY = 'auto';
+// Auto: 1080p60 when the graphics card can encode H.264 (nearly free for the CPU), else the much lighter 720p60
+let gpuEncode = null; // true / false once checked, null = unknown
+async function checkGpuEncode() {
+  if (!navigator.mediaCapabilities?.encodingInfo) return null;
+  const base = { width: 1920, height: 1080, bitrate: 10000000, framerate: 60 };
+  for (const contentType of ['video/H264;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f', 'video/H264']) {
+    try {
+      const r = await navigator.mediaCapabilities.encodingInfo({ type: 'webrtc', video: { contentType, ...base } });
+      if (r.supported) return !!r.powerEfficient;
+    } catch {}
+  }
+  return null;
+}
+checkGpuEncode().then(v => { gpuEncode = v; syncGpuNote?.(); });
 const REACTIONS = ['👍', '😂', '😮', '🔥', '👏', '❤️', '💀', '🎉', '😭', '🤯'];
 const MAX_FILE = 25 * 1024 * 1024;
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -466,7 +485,10 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('sr-' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('sr-' + k, JSON.stringify(v)); } catch {} },
 };
-const settings = Object.assign({ quality: '1080', mode: 'motion', audio: true, ptt: false, sounds: true, notify: false }, store.get('settings', {}));
+const settings = Object.assign({ quality: DEFAULT_QUALITY, mode: 'motion', audio: true, ptt: false, sounds: true, notify: false }, store.get('settings', {}));
+if (settings.quality !== 'auto' && !QUALITY[settings.quality]) settings.quality = DEFAULT_QUALITY; // e.g. the old 30 fps '720' preset
+if (!store.get('auto-q', false)) { if (['1080', '1080-60'].includes(settings.quality)) settings.quality = DEFAULT_QUALITY; store.set('auto-q', true); store.set('settings', settings); }
+const quality = () => settings.quality === 'auto' ? QUALITY[gpuEncode === false ? '720-60' : '1080-60'] : (QUALITY[settings.quality] || QUALITY['1080-60']);
 
 let peer = null, door = null, roomCode = '', leaving = false, audioCtx = null;
 const me = { name: '' };
@@ -758,7 +780,7 @@ function onCall(call) {
     micCalls.set(call.peer, call); wireMicCall(call);
     return;
   }
-  call.answer();
+  call.answer(undefined, { sdpTransform: tuneSdp });
   call.on('stream', s => addTile(call.peer, s, call));
   call.on('close', () => { if (tiles.get(call.peer)?.call === call) removeTile(call.peer); });
 }
@@ -766,15 +788,16 @@ function onCall(call) {
 // ---------- screen sharing ----------
 async function startShare() {
   if (myScreen) return stopShare();
-  const q = QUALITY[settings.quality] || QUALITY['1080'];
+  const q = quality();
   const video = { frameRate: { ideal: q.fps, max: q.fps } };
-  if (q.w) { video.width = { ideal: q.w }; video.height = { ideal: q.h }; }
+  if (q.w) { video.width = { ideal: q.w, max: q.w }; video.height = { ideal: q.h, max: q.h }; }
   try { myScreen = await navigator.mediaDevices.getDisplayMedia({ video, audio: settings.audio }); }
   catch { myScreen = null; return; }
   const vt = myScreen.getVideoTracks()[0];
   vt.contentHint = settings.mode === 'detail' ? 'detail' : 'motion';
   vt.addEventListener('ended', stopShare);
   addTile(peer.id, myScreen, null);
+  if (store.get('hidePreview', false)) tiles.get(peer.id)?.setPreview(true);
   for (const id of persons.keys()) callScreen(id);
   setDockBtn($('share'), 'stop', 'Stop', 'Stop sharing'); $('share').classList.add('live');
   toast("You're live");
@@ -785,13 +808,34 @@ $('emptyShare').onclick = startShare;
 
 function callScreen(id) {
   screenCalls.get(id)?.close();
-  const call = peer.call(id, myScreen, { metadata: { kind: 'screen', name: me.name } });
+  const call = peer.call(id, myScreen, { metadata: { kind: 'screen', name: me.name }, sdpTransform: tuneSdp });
   if (!call) return;
   screenCalls.set(id, call);
   tuneSender(call);
 }
+// Screen video: prefer H.264, which most PCs encode on the graphics card, so 1080p60 doesn't
+// choke the CPU like software VP8 does; then VP9, VP8, AV1. Also start at a high bitrate
+// instead of ramping up slowly from ~300 kbps.
+function tuneSdp(sdp) {
+  try {
+    const nl = sdp.includes('\r\n') ? '\r\n' : '\n', L = sdp.split(nl);
+    const m = L.findIndex(l => l.startsWith('m=video')); if (m < 0) return sdp;
+    let end = L.findIndex((l, i) => i > m && l.startsWith('m=')); if (end < 0) end = L.length;
+    const codec = {};
+    for (let i = m; i < end; i++) { const r = L[i].match(/^a=rtpmap:(\d+) ([\w-]+)\//); if (r) codec[r[1]] = r[2].toUpperCase(); }
+    const rank = pt => ({ H264: 0, VP9: 1, VP8: 2, AV1: 3 })[codec[pt]] ?? 9;
+    const parts = L[m].split(' '), pts = parts.slice(3);
+    L[m] = parts.slice(0, 3).concat(pts.map((pt, i) => [pt, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(x => x[0])).join(' ');
+    const kbps = Math.round(quality().br / 1000);
+    for (let i = m; i < end; i++) {
+      const f = L[i].match(/^a=fmtp:(\d+) /);
+      if (f && rank(f[1]) < 9 && !L[i].includes('x-google-start-bitrate')) L[i] += `;x-google-start-bitrate=${Math.min(4000, kbps)};x-google-max-bitrate=${kbps}`;
+    }
+    return L.join(nl);
+  } catch { return sdp; }
+}
 async function tuneSender(call) {
-  const q = QUALITY[settings.quality] || QUALITY['1080'];
+  const q = quality();
   for (let i = 0; i < 40 && !call.peerConnection; i++) await sleep(100);
   const pc = call.peerConnection; if (!pc) return;
   const apply = () => {
@@ -799,9 +843,13 @@ async function tuneSender(call) {
       if (s.track?.kind !== 'video') continue;
       const prm = s.getParameters();
       if (!prm.encodings || !prm.encodings.length) prm.encodings = [{}];
-      prm.encodings[0].maxBitrate = q.br;
+      // if the capture is bigger than the chosen quality, let the encoder shrink it (cheaper than encoding full size)
+      const capH = s.track.getSettings?.().height || 0;
+      const scale = q.h && capH > q.h ? Math.round((capH / q.h) * 100) / 100 : 1;
+      Object.assign(prm.encodings[0], { maxBitrate: q.br, maxFramerate: q.fps, scaleResolutionDownBy: scale, priority: 'high', networkPriority: 'high' });
+      // games/video: drop resolution before frames; text/code: keep it sharp
       prm.degradationPreference = settings.mode === 'detail' ? 'maintain-resolution' : 'maintain-framerate';
-      s.setParameters(prm).catch(() => {});
+      s.setParameters(prm).catch(() => { delete prm.degradationPreference; s.setParameters(prm).catch(() => {}); });
     }
   };
   if (pc.connectionState === 'connected') apply();
@@ -844,7 +892,7 @@ function buildTile(id) {
   t.canvas = el('canvas');
   const who = el('div', 'chip who'); who.style.setProperty('--c', isMe ? colorFor(peer.id) : colorFor(id));
   who.append(el('i'), el('span', '', isMe ? 'Your screen' : `${nameOf(id)}`));
-  t.stats = el('div', 'chip stats'); t.stats.hidden = isMe;
+  t.stats = el('div', 'chip stats');
   t.live = el('div', 'chip live', 'LIVE');
   const tools = el('div', 'tools');
   const btn = (icon, tip, fn) => {
@@ -868,6 +916,18 @@ function buildTile(id) {
   if (document.pictureInPictureEnabled) btn('pip', 'Pop out', () => t.video.requestPictureInPicture().catch(() => {}));
   btn('focus', 'Focus', () => setFocus(focusId === id ? null : id));
   btn('full', 'Fullscreen', () => toggleFullscreen(t.el));
+  if (isMe) {
+    // not drawing your own screen back to you saves GPU work while you game; friends still see it
+    t.setPreview = off => {
+      t.previewOff = off; store.set('hidePreview', off);
+      t.video.srcObject = off ? null : myScreen;
+      if (!off) t.video.play().catch(() => {});
+      t.el.classList.toggle('nopreview', off);
+      t.eyeBtn.innerHTML = I(off ? 'eye' : 'eye-off');
+      t.eyeBtn.dataset.tip = off ? 'Show my preview' : 'Hide my preview (saves power)';
+    };
+    t.eyeBtn = btn('eye-off', 'Hide my preview (saves power)', () => t.setPreview(!t.previewOff));
+  }
 
   t.el.append(t.video, t.canvas, who, t.stats, t.live, tools);
   wireCanvas(t);
@@ -895,7 +955,7 @@ function setFocus(id) {
 function toggleFullscreen(node) { document.fullscreenElement ? document.exitFullscreen() : node.requestFullscreen?.().catch(() => {}); }
 
 function screenshot(t) {
-  const v = t.video; if (!v.videoWidth) return;
+  const v = t.video; if (!v.videoWidth) return toast(t.previewOff ? 'Show your preview to take a screenshot' : 'Wait for the stream to load', true);
   const c = el('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
   const ctx = c.getContext('2d'); ctx.drawImage(v, 0, 0);
   const cr = contentRect(v), dpr = t.canvas.width / Math.max(1, t.canvas.clientWidth), sx = c.width / cr.w, sy = c.height / cr.h;
@@ -909,7 +969,7 @@ function toggleRecord(t, b) {
   if (typeof MediaRecorder === 'undefined') return toast("This browser can't record", true);
   const type = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'].find(x => MediaRecorder.isTypeSupported(x)) || '';
   const chunks = [];
-  try { t.rec = new MediaRecorder(t.video.srcObject, type ? { mimeType: type } : undefined); } catch { return toast("Couldn't start recording", true); }
+  try { t.rec = new MediaRecorder(t.video.srcObject || (t.id === peer.id ? myScreen : null), type ? { mimeType: type } : undefined); } catch { return toast("Couldn't start recording", true); }
   t.rec.ondataavailable = e => e.data.size && chunks.push(e.data);
   t.rec.onstop = () => {
     b.classList.remove('rec'); t.live.classList.remove('rec'); t.live.textContent = 'LIVE';
@@ -924,7 +984,7 @@ function toggleRecord(t, b) {
 }
 async function updateStats() {
   for (const t of tiles.values()) {
-    if (t.id === peer.id) continue;
+    if (t.id === peer.id) { t.stats.textContent = await senderStats(); continue; }
     const v = t.video; let txt = v.videoWidth ? `${v.videoHeight}p` : 'Connecting…';
     const pc = t.call?.peerConnection;
     if (pc) {
@@ -940,6 +1000,46 @@ async function updateStats() {
     }
     t.stats.textContent = txt;
   }
+}
+// Auto mode corrects itself from what the encoder really does while live:
+// GPU encoding -> go up to 1080p60; CPU encoding that is struggling -> drop to 720p60 (keeping 60 fps).
+let cpuStrain = 0;
+function adaptAuto(w) {
+  if (settings.quality !== 'auto' || !myScreen) return;
+  cpuStrain = w.gpu === false && w.why === 'cpu' ? cpuStrain + 1 : 0;
+  let next = null;
+  if (w.gpu === true && gpuEncode !== true) { gpuEncode = true; next = '1080-60'; }
+  else if (cpuStrain >= 3 && gpuEncode !== false) { gpuEncode = false; next = '720-60'; }
+  if (!next) return;
+  cpuStrain = 0;
+  const q = QUALITY[next], vt = myScreen.getVideoTracks()[0];
+  vt.applyConstraints({ width: { ideal: q.w, max: q.w }, height: { ideal: q.h, max: q.h }, frameRate: { ideal: q.fps, max: q.fps } })
+    .catch(() => {}).finally(() => { for (const c of screenCalls.values()) tuneSender(c); });
+  syncGpuNote();
+}
+// what I'm actually sending (worst viewer), and what's holding it back
+async function senderStats() {
+  const vt = myScreen?.getVideoTracks()[0];
+  const cap = vt?.getSettings?.() || {};
+  const capTxt = cap.height ? `Capturing ${cap.height}p ${Math.round(cap.frameRate || 0)} fps` : '';
+  let worst = null;
+  for (const call of screenCalls.values()) {
+    const pc = call.peerConnection; if (!pc) continue;
+    try {
+      const rep = await pc.getStats();
+      rep.forEach(s => {
+        if (s.type !== 'outbound-rtp' || s.kind !== 'video' || s.framesPerSecond == null) return;
+        const codec = (rep.get(s.codecId)?.mimeType || '').split('/')[1] || '';
+        const cur = { fps: Math.round(s.framesPerSecond), h: s.frameHeight, why: s.qualityLimitationReason, codec, gpu: s.powerEfficientEncoder };
+        if (!worst || cur.fps < worst.fps) worst = cur;
+      });
+    } catch {}
+  }
+  if (!worst) return screenCalls.size ? 'Connecting…' : (capTxt || 'Waiting for viewers');
+  adaptAuto(worst);
+  const why = { cpu: ' · limited by CPU', bandwidth: ' · limited by network' }[worst.why] || '';
+  const enc = worst.gpu === true ? ' on GPU' : worst.gpu === false ? ' on CPU' : '';
+  return `Sending ${worst.h || '?'}p · ${worst.fps} fps${worst.codec ? ' · ' + worst.codec + enc : ''}${why}`;
 }
 
 // ---------- drawing & laser pings ----------
@@ -1259,7 +1359,14 @@ $('emptyInvite').onclick = copyInvite;
 $('leave').onclick = () => { cleanup(true); location.replace(location.pathname); };
 
 // ---------- settings ----------
+function syncGpuNote() {
+  const n = $('gpuNote'); if (!n) return;
+  n.textContent = gpuEncode === true ? 'Auto: your graphics card encodes the video, so you stream 1080p at 60 fps with almost no CPU use.'
+    : gpuEncode === false ? "Auto: no graphics-card encoder found, so you stream 720p at 60 fps to keep your PC smooth."
+    : "Auto: 1080p at 60 fps. If your PC or internet can't keep up, it lowers resolution but keeps 60 fps.";
+}
 function syncSettingsUI() {
+  syncGpuNote();
   document.querySelectorAll('.seg').forEach(s => s.querySelectorAll('button').forEach(b => b.classList.toggle('sel', settings[s.dataset.key] === b.dataset.v)));
   document.querySelectorAll('.switch').forEach(i => { i.checked = !!settings[i.dataset.key]; });
 }
