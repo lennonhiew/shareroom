@@ -9,11 +9,11 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<!-- everything is served from this site (no Google Fonts / jsDelivr) so it also loads where those are blocked, e.g. mainland China -->
+<link rel="preload" href="vendor/plus-jakarta-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+<script src="vendor/peerjs.min.js"></script>
 <style>
+@font-face { font-family: "Plus Jakarta Sans"; font-style: normal; font-weight: 400 800; font-display: swap; src: url(vendor/plus-jakarta-sans-latin.woff2) format("woff2"); }
 /* ---------- tokens ---------- */
 :root {
   --ink: #0D1120;      /* the stage: dark so shared screens stand out */
@@ -460,6 +460,16 @@ const QUALITY = {
   'source':  { w: null, h: null, fps: 60, br: 16000000 },
 };
 const DEFAULT_QUALITY = 'auto';
+// Route-finding (STUN) servers: Google's is blocked in mainland China, so also offer Xiaomi's and Cloudflare's.
+// Browsers query them all at once and use whichever answer. TURN relays are PeerJS's free public ones.
+const ICE = {
+  iceServers: [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
+    { urls: 'stun:stun.miwifi.com:3478' },
+    { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+  ],
+  sdpSemantics: 'unified-plan',
+};
 // Auto: 1080p60 when the graphics card can encode H.264 (nearly free for the CPU), else the much lighter 720p60
 let gpuEncode = null; // true / false once checked, null = unknown
 async function checkGpuEncode() {
@@ -524,7 +534,7 @@ function withTransition(fn) {
 }
 function newPeer(id) {
   return new Promise((resolve, reject) => {
-    const p = id ? new Peer(id) : new Peer();
+    const p = id ? new Peer(id, { config: ICE }) : new Peer({ config: ICE });
     const ok = () => { p.off('error', fail); resolve(p); };
     const fail = e => { p.off('open', ok); p.destroy(); reject(e); };
     p.once('open', ok); p.once('error', fail);
