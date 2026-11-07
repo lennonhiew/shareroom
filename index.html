@@ -133,6 +133,18 @@ main.chat-closed { grid-template-columns: 1fr 0px; }
 .lang-toggle:active { transform: scale(0.94); }
 #langLobby { position: fixed; top: 16px; right: 16px; z-index: 5; animation: fade-in 500ms 300ms both; }
 .tile.leaving { animation: tile-out 180ms ease-in forwards; }
+.linkish { justify-self: center; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 8px; color: var(--muted); font-size: 13px; font-weight: 600; transition: color 150ms, background-color 150ms, transform 120ms var(--ease-out); }
+.linkish:hover { color: var(--text); background: var(--raised); }
+.linkish:active { transform: scale(0.96); }
+.linkish.attention { color: var(--lilac-2); background: #8b7cff1f; animation: pop 400ms var(--ease-out); }
+.net-rows { display: grid; gap: 4px; max-height: 50vh; overflow: auto; }
+.net-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-radius: 10px; background: var(--ink); font-size: 13px; font-weight: 600; animation: msg-in 200ms var(--ease-out) both; }
+.net-row small { display: block; color: var(--muted); font-weight: 500; font-size: 12px; overflow-wrap: anywhere; }
+.net-row .st { white-space: nowrap; font-weight: 700; }
+.net-row .st.ok { color: var(--mint); } .net-row .st.bad { color: var(--danger); } .net-row .st.wait { color: var(--muted); }
+.net-summary { margin: 0; font-size: 13px; font-weight: 600; }
+.net-summary.good { color: var(--mint); } .net-summary.bad { color: var(--coral); }
+.dlg-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .tile.nopreview::before { content: attr(data-msg); position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--muted); font-size: 13px; background: var(--surface); }
 @keyframes tile-in { from { opacity: 0; transform: scale(0.96) } }
 @keyframes tile-out { to { opacity: 0; transform: scale(0.97) } }
@@ -346,6 +358,7 @@ dialog[open]::backdrop { animation: fade-in 200ms; }
   <symbol id="i-install" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
   <symbol id="i-bad" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></symbol>
   <symbol id="i-logo" viewBox="0 0 32 32"><rect x="1" y="1" width="30" height="30" rx="9" fill="#8B7CFF" stroke="none"/><rect x="7" y="9" width="18" height="12" rx="2.5" fill="none" stroke="#fff" stroke-width="2.4"/><path d="M13 25h6" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="23.5" cy="9" r="3.5" fill="#FF7A59" stroke="#8B7CFF" stroke-width="2"/></symbol>
 </svg>
@@ -377,6 +390,7 @@ dialog[open]::backdrop { animation: fade-in 200ms; }
     </div>
     <button id="join" class="btn"><span data-i18n="join_room">Join room</span><svg class="i"><use href="#i-arrow"/></svg></button>
     <div id="lobbyMsg" role="status"></div>
+    <button class="linkish" id="netTestBtn" type="button"><svg class="i sm"><use href="#i-activity"/></svg><span data-i18n="nettest">Connection test</span></button>
   </div>
 </section>
 
@@ -454,6 +468,20 @@ dialog[open]::backdrop { animation: fade-in 200ms; }
     <label class="toggle"><span><span data-i18n="s_ptt">Push-to-talk</span><small data-i18n="s_ptt_d">Hold Space to talk in voice</small></span><input type="checkbox" class="switch" data-key="ptt"></label>
     <label class="toggle"><span><span data-i18n="s_sounds">Sound effects</span><small data-i18n="s_sounds_d">Joins, leaves and messages</small></span><input type="checkbox" class="switch" data-key="sounds"></label>
     <label class="toggle"><span><span data-i18n="s_notify">Desktop notifications</span><small data-i18n="s_notify_d">When a message arrives in the background</small></span><input type="checkbox" class="switch" data-key="notify"></label>
+    <button class="btn" id="netTestBtn2" type="button"><svg class="i"><use href="#i-activity"/></svg><span data-i18n="nettest">Connection test</span></button>
+  </div>
+</dialog>
+
+<dialog id="netDlg">
+  <div class="dlg-head"><h2 data-i18n="nettest">Connection test</h2><button class="btn ghost icon-btn" id="closeNet" title="Close" data-i18n-title="close"><svg class="i"><use href="#i-x"/></svg></button></div>
+  <div class="dlg-body">
+    <p class="note" style="margin:0" data-i18n="nt_intro"></p>
+    <div class="net-rows" id="netRows"></div>
+    <p class="net-summary" id="netSummary"></p>
+    <div class="dlg-actions">
+      <button class="btn" id="netAgain" type="button"><span data-i18n="nt_again">Run again</span></button>
+      <button class="btn primary" id="netCopy" type="button"><svg class="i"><use href="#i-copy"/></svg><span data-i18n="nt_copy">Copy results</span></button>
+    </div>
   </div>
 </dialog>
 
@@ -468,7 +496,8 @@ const QUALITY = {
 };
 const DEFAULT_QUALITY = 'auto';
 // Route-finding (STUN) servers: Google's is blocked in mainland China, so also offer Xiaomi's and Cloudflare's.
-// Browsers query them all at once and use whichever answer. TURN relays are PeerJS's free public ones.
+// Browsers query them all at once and use whichever answer. TURN relays carry the traffic when two
+// networks can't connect directly (common between China and elsewhere).
 const ICE = {
   iceServers: [
     { urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
@@ -477,6 +506,17 @@ const ICE = {
   ],
   sdpSemantics: 'unified-plan',
 };
+// Short-lived relay credentials from our own endpoint (e.g. a Cloudflare Worker for Cloudflare TURN).
+// Empty = no extra relay configured.
+const RELAY_URL = '';
+const relaysReady = (async () => {
+  if (!RELAY_URL) return;
+  try {
+    const r = await fetch(RELAY_URL, { signal: AbortSignal.timeout(5000), cache: 'no-store' });
+    const j = await r.json();
+    if (Array.isArray(j.iceServers)) ICE.iceServers.push(...j.iceServers);
+  } catch {}
+})();
 // Auto: 1080p60 when the graphics card can encode H.264 (nearly free for the CPU), else the much lighter 720p60
 let gpuEncode = null; // true / false once checked, null = unknown
 async function checkGpuEncode() {
@@ -515,7 +555,16 @@ const STR = {
     err_lib: "Couldn't load the connection library. Check your internet and reload.",
     opening: 'Opening your room…', err_open: why => `Couldn't open a room (${why}). Check your internet and try again.`,
     enter6: 'Enter all 6 letters of the room code.', joining: 'Joining…',
-    err_reach: "Couldn't reach that room. Check the code, or ask your friend for a new one.",
+    err_reach: "Couldn't reach that room. Check the code, or run the connection test below.",
+    still_connecting: 'Still connecting… this can take longer between countries.',
+    err_direct: "The room exists, but your network and your friend's couldn't connect. This often happens between China and other countries. Run the connection test below.",
+    nettest: 'Connection test', nt_intro: "Checks what your network can reach. If friends can't connect, send the results to whoever is helping you.",
+    nt_server: 'Connection server', nt_stun: 'Route finder', nt_relay: 'Relay', nt_nat: 'Network type',
+    nt_open: 'Open', nt_strict: 'Strict: needs a relay', nt_unknown: 'Unknown',
+    nt_ok: 'OK', nt_fail: 'Not reachable', nt_running: 'Testing…', nt_again: 'Run again', nt_copy: 'Copy results',
+    nt_copied: 'Results copied. Paste them to whoever is helping you.',
+    nt_good: 'A relay is reachable, so connecting to friends should work.',
+    nt_bad: 'No relay is reachable from this network, so friends on strict networks (like in China) may not be able to connect.',
     err_noroom: 'No room with that code. Check it with your friend.',
     copy_invite: 'Copy invite', install: 'Install app', settings: 'Settings', leave: 'Leave',
     empty_h: "Nobody's sharing yet", empty_p: 'Go live and your friends see your screen instantly. Several people can share at once.',
@@ -575,7 +624,16 @@ const STR = {
     err_lib: '无法加载连接组件。请检查网络后刷新页面。',
     opening: '正在创建房间…', err_open: why => `无法创建房间（${why}）。请检查网络后重试。`,
     enter6: '请输入完整的 6 位房间码。', joining: '正在加入…',
-    err_reach: '连接不到这个房间。请检查房间码，或让朋友重新发一个。',
+    err_reach: '连接不到这个房间。请检查房间码，或运行下面的连接测试。',
+    still_connecting: '仍在连接中…跨国连接可能需要更久。',
+    err_direct: '房间存在，但你和朋友的网络无法互相连接。这在中国与其他国家之间很常见。请运行下面的连接测试。',
+    nettest: '连接测试', nt_intro: '检查你的网络能连到哪些服务。如果朋友连不上，把结果发给帮你排查的人。',
+    nt_server: '连接服务器', nt_stun: '路由探测', nt_relay: '中继', nt_nat: '网络类型',
+    nt_open: '开放', nt_strict: '严格：需要中继', nt_unknown: '未知',
+    nt_ok: '正常', nt_fail: '无法连接', nt_running: '测试中…', nt_again: '重新测试', nt_copy: '复制结果',
+    nt_copied: '结果已复制，粘贴发给帮你排查的人吧。',
+    nt_good: '可以连到中继，和朋友连接应该没问题。',
+    nt_bad: '这个网络连不到任何中继，网络较严格的朋友（例如在中国）可能连不上。',
     err_noroom: '没有这个房间码。请和朋友核对一下。',
     copy_invite: '复制邀请', install: '安装应用', settings: '设置', leave: '离开',
     empty_h: '还没有人共享屏幕', empty_p: '开始共享，朋友们马上就能看到你的屏幕。多人可以同时共享。',
@@ -763,6 +821,7 @@ $('create').onclick = async () => {
   if (!prepare()) return;
   lobbyBusy(true, tr('opening'), $('create'));
   try {
+    await relaysReady;
     peer = await newPeer(); wirePeer();
     for (let i = 0; i < 5 && !door; i++) {
       const code = randCode();
@@ -781,19 +840,33 @@ $('join').onclick = async () => {
   if (!prepare()) return;
   lobbyBusy(true, tr('joining'), $('join'));
   try {
+    await relaysReady;
     peer = await newPeer(); wirePeer();
     const list = await new Promise((resolve, reject) => {
-      const t = setTimeout(() => done(new Error(tr('err_reach'))), 15000);
+      // connections between countries (and through relays) can take a while, so wait longer and say so
+      const t = setTimeout(() => done(new Error(tr('err_reach'))), 25000);
+      const slow = setTimeout(() => { $('lobbyMsg').textContent = tr('still_connecting'); }, 8000);
       const onErr = e => { if (e.type === 'peer-unavailable' && String(e.message).includes(PREFIX + code)) done(new Error(tr('err_noroom'))); };
-      function done(err, val) { clearTimeout(t); peer.off('error', onErr); err ? reject(err) : resolve(val); }
+      let finished = false;
+      function done(err, val) { if (finished) return; finished = true; clearTimeout(t); clearTimeout(slow); peer.off('error', onErr); err ? reject(err) : resolve(val); }
       peer.on('error', onErr);
       const d = peer.connect(PREFIX + code, { reliable: true });
       d.on('data', m => { if (m && m.type === 'peers') { d.close(); done(null, m.list); } });
+      // the room exists but our networks can't reach each other (no direct path, no working relay)
+      const watchIce = (n = 0) => {
+        const pc = d.peerConnection;
+        if (!pc) { if (n < 50 && !finished) setTimeout(() => watchIce(n + 1), 200); return; }
+        pc.addEventListener('iceconnectionstatechange', () => { if (pc.iceConnectionState === 'failed') done(new Error(tr('err_direct'))); });
+      };
+      watchIce();
     });
     roomCode = code;
     list.forEach((id, i) => connectTo(id, i === 0));
     enterRoom();
-  } catch (e) { cleanup(); lobbyBusy(false, e.message || String(e)); shakeBoxes(); }
+  } catch (e) {
+    cleanup(); lobbyBusy(false, e.message || String(e)); shakeBoxes();
+    const b = $('netTestBtn'); b.classList.remove('attention'); b.offsetWidth; b.classList.add('attention');
+  }
 };
 function shakeBoxes() { const c = $('codeBoxes'); c.classList.remove('shake'); c.offsetWidth; c.classList.add('shake'); }
 
@@ -1547,17 +1620,103 @@ document.querySelectorAll('.switch').forEach(i => i.addEventListener('change', a
   store.set('settings', settings);
 }));
 $('settingsBtn').onclick = () => { syncSettingsUI(); $('settings').showModal(); };
-function closeDialog() {
-  const d = $('settings'); if (!d.open) return;
+function closeDialog(d = $('settings')) {
+  if (!d.open) return;
   if (reducedMotion.matches) return d.close();
   d.classList.add('closing');
   const done = () => { if (d.open) { d.classList.remove('closing'); d.close(); } };
   d.addEventListener('animationend', done, { once: true });
   setTimeout(done, 250); // always close, even if the animation never runs
 }
-$('closeSettings').onclick = closeDialog;
+$('closeSettings').onclick = () => closeDialog();
 $('settings').addEventListener('cancel', e => { e.preventDefault(); closeDialog(); });
 $('settings').addEventListener('click', e => { if (e.target === $('settings')) closeDialog(); });
+
+// ---------- connection test: what can this network reach? ----------
+// Ask the browser for one kind of ICE candidate from one server: 'srflx' = route finder (STUN) answered,
+// 'relay' = relay (TURN) gave us an address. Resolves with ms, or null if nothing came back.
+function probeIce(server, want, ms = 7000) {
+  return new Promise(async res => {
+    let pc; try { pc = new RTCPeerConnection({ iceServers: [server], iceTransportPolicy: want === 'relay' ? 'relay' : 'all' }); } catch { return res(null); }
+    const t0 = performance.now(), seen = [];
+    let over = false;
+    const fin = v => { if (over) return; over = true; clearTimeout(tm); try { pc.close(); } catch {} res(v); };
+    const tm = setTimeout(() => fin(want === 'all' ? seen : null), ms);
+    pc.onicecandidate = e => {
+      if (!e.candidate) { if (want === 'all') fin(seen); return; }
+      const c = e.candidate.candidate;
+      if (want === 'all') { if (/ typ srflx /.test(c)) seen.push(c); }
+      else if (c.includes(` typ ${want} `)) fin(Math.round(performance.now() - t0));
+    };
+    pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') fin(want === 'all' ? seen : null); };
+    pc.createDataChannel('t');
+    try { await pc.setLocalDescription(await pc.createOffer()); } catch { fin(null); }
+  });
+}
+let netLines = [];
+async function runNetTest() {
+  const rows = $('netRows'); rows.textContent = ''; netLines = [];
+  const sum = $('netSummary'); sum.textContent = ''; sum.className = 'net-summary';
+  $('netAgain').disabled = true;
+  await relaysReady;
+  const row = (label, detail) => {
+    const r = el('div', 'net-row'), l = el('span', '', label), s = el('span', 'st wait', tr('nt_running'));
+    l.append(el('small', '', detail)); r.append(l, s); rows.append(r);
+    return (ok, extra = '', text) => {
+      s.className = 'st ' + (ok ? 'ok' : 'bad');
+      s.textContent = text || ((ok ? '✓ ' + tr('nt_ok') : '✗ ' + tr('nt_fail')) + (extra ? ' · ' + extra : ''));
+      netLines.push(`${ok ? 'OK  ' : 'FAIL'} ${label} — ${detail}${extra ? ' — ' + extra : ''}`);
+      return ok;
+    };
+  };
+  const jobs = [];
+  // 1. the PeerJS server that introduces people
+  const srv = row(tr('nt_server'), '0.peerjs.com');
+  jobs.push((async () => {
+    const t0 = performance.now();
+    try {
+      const p = new Peer({ config: ICE });
+      await new Promise((ok, bad) => { p.once('open', ok); p.once('error', bad); setTimeout(bad, 10000); });
+      srv(true, Math.round(performance.now() - t0) + ' ms'); p.destroy();
+    } catch { srv(false); }
+  })());
+  // 2. route finders and relays, one row per address
+  const stuns = [], relays = [];
+  for (const s of ICE.iceServers) for (const u of [].concat(s.urls)) {
+    if (/^stun:/.test(u)) stuns.push({ urls: u });
+    else if (/^turns?:/.test(u)) relays.push({ urls: u, username: s.username, credential: s.credential });
+  }
+  for (const s of stuns) { const done = row(tr('nt_stun'), s.urls.replace(/^stun:/, '')); jobs.push(probeIce(s, 'srflx').then(v => done(v != null, v != null ? v + ' ms' : ''))); }
+  let anyRelay = false;
+  for (const s of relays) { const done = row(tr('nt_relay'), s.urls.replace(/^turns?:/, (m) => m === 'turns:' ? 'TLS ' : '')); jobs.push(probeIce(s, 'relay').then(v => { if (v != null) anyRelay = true; done(v != null, v != null ? v + ' ms' : ''); })); }
+  // 3. NAT type: the same local socket mapped to different public ports by different servers = strict (symmetric) NAT
+  const nat = row(tr('nt_nat'), stuns.map(s => s.urls.replace(/^stun:/, '').split(':')[0]).join(', '));
+  jobs.push((async () => {
+    const cands = await probeIce({ urls: stuns.map(s => s.urls) }, 'all');
+    const ports = {};
+    for (const c of cands || []) { const p = c.split(' '); (ports[p[4]] ||= new Set()).add(p[5]); }
+    const ips = Object.keys(ports);
+    if (!ips.length) nat(false, '', '? ' + tr('nt_unknown'));
+    else if (ips.some(ip => ports[ip].size > 1)) nat(false, tr('nt_strict'), '⚠ ' + tr('nt_strict'));
+    else nat(true, tr('nt_open'), '✓ ' + tr('nt_open'));
+  })());
+  await Promise.all(jobs);
+  sum.textContent = tr(anyRelay ? 'nt_good' : 'nt_bad');
+  sum.classList.add(anyRelay ? 'good' : 'bad');
+  netLines.push(anyRelay ? 'Relay reachable' : 'NO relay reachable');
+  $('netAgain').disabled = false;
+}
+function openNetTest() { $('netDlg').showModal(); runNetTest(); }
+$('netTestBtn').onclick = openNetTest;
+$('netTestBtn2').onclick = () => { closeDialog(); setTimeout(openNetTest, 160); };
+$('netAgain').onclick = runNetTest;
+$('netCopy').onclick = async () => {
+  const text = ['ShareRoom connection test', new Date().toString(), navigator.userAgent, ...netLines].join('\n');
+  try { await navigator.clipboard.writeText(text); toast(tr('nt_copied')); } catch { prompt(tr('nt_copy'), text); }
+};
+$('closeNet').onclick = () => closeDialog($('netDlg'));
+$('netDlg').addEventListener('cancel', e => { e.preventDefault(); closeDialog($('netDlg')); });
+$('netDlg').addEventListener('click', e => { if (e.target === $('netDlg')) closeDialog($('netDlg')); });
 
 // ---------- install as an app ----------
 let installEvt = null;
