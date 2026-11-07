@@ -506,15 +506,16 @@ const ICE = {
   ],
   sdpSemantics: 'unified-plan',
 };
-// Short-lived relay credentials from our own endpoint (e.g. a Cloudflare Worker for Cloudflare TURN).
-// Empty = no extra relay configured.
-const RELAY_URL = '';
+// Cloudflare TURN relay: a GitHub Action refreshes 24-hour credentials into turn.json every 6 hours
+// (served from this same site, which loads in China, unlike *.workers.dev).
+const RELAY_URL = 'turn.json';
 const relaysReady = (async () => {
-  if (!RELAY_URL) return;
+  if (!RELAY_URL || !/^https?:$/.test(location.protocol)) return;
   try {
     const r = await fetch(RELAY_URL, { signal: AbortSignal.timeout(5000), cache: 'no-store' });
+    if (!r.ok) return;
     const j = await r.json();
-    if (Array.isArray(j.iceServers)) ICE.iceServers.push(...j.iceServers);
+    for (const s of [].concat(j.iceServers || [])) if (s && s.urls) ICE.iceServers.push(s);
   } catch {}
 })();
 // Auto: 1080p60 when the graphics card can encode H.264 (nearly free for the CPU), else the much lighter 720p60

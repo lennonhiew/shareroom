@@ -1,0 +1,64 @@
+# Publishes the site to GitHub Pages and, on every deploy, puts fresh 24-hour
+# Cloudflare TURN relay credentials in turn.json. Runs on each push and every
+# 6 hours, so the credentials in turn.json are always valid. The long-term
+# Cloudflare key stays in repo secrets and never reaches the site.
+name: Deploy site
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect site files
+        run: |
+          mkdir _site
+          rsync -a --exclude .git --exclude .github --exclude _site ./ _site/
+
+      - name: Fetch short-lived Cloudflare TURN credentials
+        env:
+          KEY_ID: ${{ secrets.CF_TURN_KEY_ID }}
+          API_TOKEN: ${{ secrets.CF_TURN_API_TOKEN }}
+        run: |
+          if [ -z "$KEY_ID" ] || [ -z "$API_TOKEN" ]; then
+            echo '{"iceServers":[]}' > _site/turn.json
+            echo "::warning::Cloudflare TURN secrets are not set; publishing without a relay"
+            exit 0
+          fi
+          curl -sS --fail-with-body -X POST \
+            "https://rtc.live.cloudflare.com/v1/turn/keys/${KEY_ID}/credentials/generate-ice-servers" \
+            -H "Authorization: Bearer ${API_TOKEN}" -H "Content-Type: application/json" \
+            -d '{"ttl": 86400}' -o raw.json
+          # browsers block port 53, so drop those addresses (Cloudflare's advice)
+          jq '{iceServers: ([.iceServers] | flatten
+                | map(.urls = ([.urls] | flatten | map(select(test(":53\\b") | not))))
+                | map(select(.urls | length > 0)))}' raw.json > _site/turn.json
+          rm raw.json
+          jq -e '[.iceServers[] | select(.username)] | length > 0' _site/turn.json > /dev/null
+          echo "Relay addresses published: $(jq -c '[.iceServers[].urls[]]' _site/turn.json)"
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
