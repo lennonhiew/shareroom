@@ -502,7 +502,7 @@ const ICE = {
   iceServers: [
     { urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
     { urls: 'stun:stun.miwifi.com:3478' },
-    { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+    // (PeerJS's public TURN relays were dropped: they no longer give out relay addresses)
   ],
   sdpSemantics: 'unified-plan',
 };
@@ -559,6 +559,7 @@ const STR = {
     err_reach: "Couldn't reach that room. Check the code, or run the connection test below.",
     still_connecting: 'Still connecting… this can take longer between countries.',
     err_direct: "The room exists, but your network and your friend's couldn't connect. This often happens between China and other countries. Run the connection test below.",
+    relay_tag: 'via relay',
     nettest: 'Connection test', nt_intro: "Checks what your network can reach. If friends can't connect, send the results to whoever is helping you.",
     nt_server: 'Connection server', nt_stun: 'Route finder', nt_relay: 'Relay', nt_nat: 'Network type',
     nt_open: 'Open', nt_strict: 'Strict: needs a relay', nt_unknown: 'Unknown',
@@ -628,6 +629,7 @@ const STR = {
     err_reach: '连接不到这个房间。请检查房间码，或运行下面的连接测试。',
     still_connecting: '仍在连接中…跨国连接可能需要更久。',
     err_direct: '房间存在，但你和朋友的网络无法互相连接。这在中国与其他国家之间很常见。请运行下面的连接测试。',
+    relay_tag: '经中继',
     nettest: '连接测试', nt_intro: '检查你的网络能连到哪些服务。如果朋友连不上，把结果发给帮你排查的人。',
     nt_server: '连接服务器', nt_stun: '路由探测', nt_relay: '中继', nt_nat: '网络类型',
     nt_open: '开放', nt_strict: '严格：需要中继', nt_unknown: '未知',
@@ -1235,6 +1237,7 @@ async function updateStats() {
         });
         if (fps != null) txt += ` · ${fps} fps`;
         if (rtt != null) txt += ` · ${rtt} ms`;
+        if (isRelayed(rep)) txt += ' · ' + tr('relay_tag');
       } catch {}
     }
     t.stats.textContent = txt;
@@ -1256,6 +1259,15 @@ function adaptAuto(w) {
     .catch(() => {}).finally(() => { for (const c of screenCalls.values()) tuneSender(c); });
   syncGpuNote();
 }
+// true when this connection's active route goes through a TURN relay (uses the Cloudflare allowance)
+function isRelayed(rep) {
+  let relayed = false;
+  rep.forEach(s => {
+    if (s.type !== 'candidate-pair' || !s.nominated || s.state !== 'succeeded') return;
+    if (rep.get(s.localCandidateId)?.candidateType === 'relay' || rep.get(s.remoteCandidateId)?.candidateType === 'relay') relayed = true;
+  });
+  return relayed;
+}
 // what I'm actually sending (worst viewer), and what's holding it back
 async function senderStats() {
   const vt = myScreen?.getVideoTracks()[0];
@@ -1269,7 +1281,7 @@ async function senderStats() {
       rep.forEach(s => {
         if (s.type !== 'outbound-rtp' || s.kind !== 'video' || s.framesPerSecond == null) return;
         const codec = (rep.get(s.codecId)?.mimeType || '').split('/')[1] || '';
-        const cur = { fps: Math.round(s.framesPerSecond), h: s.frameHeight, why: s.qualityLimitationReason, codec, gpu: s.powerEfficientEncoder };
+        const cur = { fps: Math.round(s.framesPerSecond), h: s.frameHeight, why: s.qualityLimitationReason, codec, gpu: s.powerEfficientEncoder, relay: isRelayed(rep) };
         if (!worst || cur.fps < worst.fps) worst = cur;
       });
     } catch {}
@@ -1278,7 +1290,7 @@ async function senderStats() {
   adaptAuto(worst);
   const why = { cpu: tr('lim_cpu'), bandwidth: tr('lim_net') }[worst.why] || '';
   const enc = worst.gpu === true ? tr('on_gpu') : worst.gpu === false ? tr('on_cpu') : '';
-  return `${tr('sending')} ${worst.h || '?'}p · ${worst.fps} fps${worst.codec ? ' · ' + worst.codec + enc : ''}${why}`;
+  return `${tr('sending')} ${worst.h || '?'}p · ${worst.fps} fps${worst.codec ? ' · ' + worst.codec + enc : ''}${why}${worst.relay ? ' · ' + tr('relay_tag') : ''}`;
 }
 
 // ---------- drawing & laser pings ----------
@@ -1682,8 +1694,9 @@ async function runNetTest() {
     } catch { srv(false); }
   })());
   // 2. route finders and relays, one row per address
-  const stuns = [], relays = [];
+  const stuns = [], relays = [], seen = new Set();
   for (const s of ICE.iceServers) for (const u of [].concat(s.urls)) {
+    if (seen.has(u)) continue; seen.add(u);
     if (/^stun:/.test(u)) stuns.push({ urls: u });
     else if (/^turns?:/.test(u)) relays.push({ urls: u, username: s.username, credential: s.credential });
   }
@@ -1691,7 +1704,7 @@ async function runNetTest() {
   let anyRelay = false;
   for (const s of relays) { const done = row(tr('nt_relay'), s.urls.replace(/^turns?:/, (m) => m === 'turns:' ? 'TLS ' : '')); jobs.push(probeIce(s, 'relay').then(v => { if (v != null) anyRelay = true; done(v != null, v != null ? v + ' ms' : ''); })); }
   // 3. NAT type: the same local socket mapped to different public ports by different servers = strict (symmetric) NAT
-  const nat = row(tr('nt_nat'), stuns.map(s => s.urls.replace(/^stun:/, '').split(':')[0]).join(', '));
+  const nat = row(tr('nt_nat'), [...new Set(stuns.map(s => s.urls.replace(/^stun:/, '').split(':')[0]))].join(', '));
   jobs.push((async () => {
     const cands = await probeIce({ urls: stuns.map(s => s.urls) }, 'all');
     const ports = {};

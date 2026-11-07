@@ -1,6 +1,6 @@
 // Network-first for our own files so friends always get the latest version,
 // with a cached copy so the app still opens if the connection blips.
-const CACHE = 'shareroom-v9';
+const CACHE = 'shareroom-v10';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'vendor/peerjs.min.js', 'vendor/plus-jakarta-sans-latin.woff2'];
 
 self.addEventListener('install', e => {
